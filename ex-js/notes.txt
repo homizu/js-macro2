@@ -1,0 +1,61 @@
+・Punctuator と PanctuationMark は別
+PunctuationMark は JSON->Scheme 変換時に無視される．
+
+・Expression と ExpressionNoIn は AssignmentExpression(NoIn) が一つだけのときはそれをそのまま返す．複数（...も含む）並んでいるときは，それらを要素とするリストを elements プロパティに持ち，type プロパティが Expressions のオブジェクトを返す． 
+
+・RepBlock の直後にある LiteralKeyword はその直後が ... の場合，繰り返し要素を区切るための PunctuationMark として扱われる．
+
+・コンマとセミコロンは SubPattern を区切る記号として使える．さらに，セミコロンは SubPatternList の最後にも書ける．
+
+・マクロ定義のパターンに書ける ... の数は各深さの式につき一つまで．テンプレートは特に制限はないが，パターン中の ... の数に比べて少なすぎるとエラーが出る．
+
+・jsexprからS式への変換では for-each を使って各部分式を変換し，それをリストにしている．そのため， Repetition の後の Ellipsis を省くと， (Repetition.elements ...) という部分式が生成されて， ... が括弧に囲まれてしまう．こうなると，どこにでも ... を書けてしまう．また，こうすると Repeat の処理でリストの中身だけ取り出す必要はなくなり，プログラムは簡潔になるかもしれない．しかし，マクロ定義の中でマクロが再帰的に使われているときに， x ... にあたる部分に ... のみが来ると， (...) となってしまい構文として意味が通らない．よって，元の実装がよい．
+
+・JS の with 文と try 文の catch 節は変数スコープが特殊．with 文の引数で与えられる変数とそのプロパティ変数は， with 文の Statement の中でだけ有効． catch 節の引数で与えられる変数は， Block の中でだけ有効．しかし，それぞれ Statement， Block の中で宣言された変数はその宣言を囲む関数の本体中で有効．これを Scheme で表現するためには， lambda で各 Statement， Block を覆い，その中で宣言されている変数について， 今見ている lambda の外側の lambda の本体の先頭，またはプログラムの先頭に define 式を追加する方法が考えられる．かなりややこしくなりそうだが， catch 節についてはできそう．しかし， with 文については，引数だけでなくそのプロパティ変数も変数名変換の対象となるが，このシステムではオブジェクトのプロパティ名は文字列で扱っており，変数名変換されることはない．よって，変数名変換すべきでないところも変換されてしまい，マクロ展開の前後でプログラムの意味が異なってしまう．うまく説明できないが，おそらく with 文は無理．幸い， with 文は JavaScript Good Parts の中で悪いパーツとして挙げられている．
+
+・PEG.js が生成するパーザは貪欲に文字列を消費する．よって，Identifier ... Identifier のようなパターンにはマッチできない．
+
+・Racket のマクロ展開器を使わない理由．展開結果の変数名変換が行われていない．シンタックスに囲われて扱いにくい．
+・Ypsilon のマクロ展開は名前変換された式が結果として得られるため扱いやすい．
+
+・misplaced definition エラーを発生させているのは base.scm の expand-define か？
+
+・式の順番をGP風に入れ替えるマクロ．引数で与えられた式がマクロ使用の場合，それは展開されず，そのまま扱われる．
+ (define-syntax sort
+    (syntax-rules (define end)
+      ((_ end e ...) (begin e ...))
+      ((_ (define x) e ...) (begin (define x) (sort e ...)))
+      ((_ e1 e2 ...) (sort e2 ... e1))))
+
+・lambda の中の misplaced definition エラーは避けられるかもしれないが，他のタグ付きS式の中に出てくる misplaced ~ は避けられない．
+・制約が多くなるのがいやだ．自由で快適なプログラミングを目指したい．
+・scheme のマクロ展開器に起因するエラーはどうなのか．
+
+・Ypsilon のマクロ展開は，パラメータの coreform-optimize に #f をセットすると抑制できる．
+ (parameterize ((coreform-optimize #f)) (macro-expand '(let ((x 1)) (+ x x))))
+ => (begin (let ((x\x60;117* 1)) (+ x\x60;117* x\x60;117*)))
+ 
+ ・ypsilonのスタックサイズは予め決められている．trunk/src/object.h の VM_STACK_BYTESIZE(8192か4096)．おそらく，これのせいで stack overflow が起こる．population.js を例にとると， scheme-to-javascript でエラーが発生する．
+ 
+ ・ypsilon が生成するファイルのパーミッションは600．変更しなければならない．
+ 
+ ・define へ変換しないことに起因する問題は，JS側での変数束縛がScheme側で保たれないことである．変数束縛が保たれていないと，Hygienic 性が保持できない．マクロによって導入された変数と元からある変数との違いが区別できなかったり，lambdaをまたぐ変数の参照ができなくなる．
+
+・VariableDecralation と Function をすべてdefine式にすると，var f = function f () { ... } のような文を変換する場合，(define V-f (define (V-f) ...)) となり，結局 misplaced definition エラーが発生する．
+
+・function文には関数宣言，無名function，名前付きfunctionの三種類あるが，そのどれもがFunctionタイプに分類されるのが問題？
+
+・マクロ使用の中に位置する文をGoodParts変換することは，予期せぬ問題を起こす恐れがある．マクロ使用の入力として与えられた文の順番が展開後の式に影響を与えるようなマクロの場合，GoodParts変換は入力された文の順番を変え，展開後の結果を変えてしまう．順番を変えるだけでなく，変数宣言のためのdefine式を挿入することも同様．
+
+・とりあえず現段階では，convert-json-gp.scm は MacroForm の中以外の変数宣言，関数宣言について変数名を収集し，そのスコープの先頭にdefine式の集合を挿入している．
+
+・最適化しないと，lambda は移動しない．
+
+・Scheme側での制約は，一つ目がdefineの位置．二つ目がlambdaのempty body．
+
+・関数から出るエラーはguardで捉えられる．
+guard (con
+         ((error? con)
+          (display "error opening file")
+          #f))
+  (call-with-input-file "foo.scm" read))
